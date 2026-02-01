@@ -1,0 +1,1 @@
+export 'acc_adapter.dart';
