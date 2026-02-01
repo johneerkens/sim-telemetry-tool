@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
-import '../../core/telemetry/mock_telemetry_source.dart';
+import '../../core/telemetry/telemetry_source_factory.dart';
 import 'telemetry_view_model.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -12,7 +12,6 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  final _mock = MockTelemetrySource();
   StreamSubscription? _sub;
   TelemetryViewModel? _vm;
 
@@ -20,7 +19,7 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
 
-    _sub = _mock.stream().listen((frame) {
+    _sub = createTelemetryStream().listen((frame) {
       setState(() {
         _vm = TelemetryViewModel.fromFrame(frame);
       });
