@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../core/models/mock_data.dart';
-import '../../core/models/car.dart';
-// Make sure this path is correct and points to where Car is defined
 
 class CarSelectionPage extends StatelessWidget {
   const CarSelectionPage({super.key});
