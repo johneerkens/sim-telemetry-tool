@@ -30,12 +30,17 @@ class AccAdapter implements SimAdapter {
       );
 
   @override
-  Future<void> connect() async {
-    if (_connected) return;
-    _connected = true;
+Future<void> connect() async {
+  if (_connected) return;
+  _connected = true;
 
+  try {
     _subscription = _udpClient.bind().listen(_handlePacket);
+  } catch (_) {
+    // ACC not running → silently ignore
   }
+}
+
 
   @override
   Future<void> disconnect() async {
@@ -52,30 +57,32 @@ class AccAdapter implements SimAdapter {
     return _telemetryController.stream;
   }
 
-  void _handlePacket(Uint8List data) {
-    // Minimal safe decoding:
-    // ACC packets are binary and versioned.
-    // We start with controls only (always present).
+void _handlePacket(Uint8List data) {
+  // ACC physics packet is large; we guard carefully.
+  if (data.length < 64) return;
 
-    if (data.length < 16) return;
+  final buffer = ByteData.sublistView(data);
 
-    final buffer = ByteData.sublistView(data);
+  // ACC standard physics offsets (stable)
+  final speedMs = buffer.getFloat32(8, Endian.little);
+  final rpm = buffer.getInt32(16, Endian.little);
+  final gear = buffer.getInt32(20, Endian.little);
 
-    // These offsets are stable for ACC broadcast control inputs
-    final throttle = buffer.getFloat32(0, Endian.little).clamp(0.0, 1.0);
-    final brake = buffer.getFloat32(4, Endian.little).clamp(0.0, 1.0);
-    final steering = buffer.getFloat32(8, Endian.little).clamp(-1.0, 1.0);
+  final throttle = buffer.getFloat32(32, Endian.little).clamp(0.0, 1.0);
+  final brake = buffer.getFloat32(36, Endian.little).clamp(0.0, 1.0);
+  final steering = buffer.getFloat32(40, Endian.little).clamp(-1.0, 1.0);
 
-    final frame = TelemetryFrame(
-      timestamp: DateTime.now(),
-      speedKph: 0.0, // added next step
-      rpm: 0,        // added next step
-      gear: 0,       // added next step
-      throttle: throttle,
-      brake: brake,
-      steering: steering,
-    );
+  final frame = TelemetryFrame(
+    timestamp: DateTime.now(),
+    speedKph: speedMs * 3.6,
+    rpm: rpm,
+    gear: gear,
+    throttle: throttle,
+    brake: brake,
+    steering: steering,
+  );
 
-    _telemetryController.add(frame);
+  _telemetryController.add(frame);
   }
 }
+
