@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/telemetry/telemetry_source_factory.dart';
@@ -56,8 +57,11 @@ void initState() {
   super.initState();
 
   _sub = createTelemetryStream().listen((frame) {
-    setState(() {
-      _vm = TelemetryViewModel.fromFrame(frame);
+  if (kDebugMode) {
+    print('Telemetry frame received: ${frame.speedKph}');
+  }
+  setState(() {
+    _vm = TelemetryViewModel.fromFrame(frame);
 
       // Update speed and rpm series
       _speedSeries.removeAt(0);
