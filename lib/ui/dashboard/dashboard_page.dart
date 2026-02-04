@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../core/telemetry/telemetry_source_factory.dart';
 import '../../core/models/telemetry_frame.dart';
-import 'telemetry_view_model.dart';
+import '../../core/telemetry/telemetry_mode.dart';
+import '../../core/telemetry/telemetry_source_factory.dart';
 import 'line_chart.dart';
 import 'telemetry_series.dart';
+import 'telemetry_view_model.dart';
 
 class DashboardPage extends StatelessWidget {
   const DashboardPage({super.key});
@@ -13,24 +14,59 @@ class DashboardPage extends StatelessWidget {
     return StreamBuilder<TelemetryFrame>(
       stream: createTelemetryStream(),
       builder: (context, snapshot) {
+        final status = _connectionStatus(
+          telemetryMode,
+          hasData: snapshot.hasData,
+        );
+
         if (!snapshot.hasData) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Telemetry Dashboard'),
+              actions: [
+                _ConnectionStatusIndicator(status: status),
+                const SizedBox(width: 16),
+              ],
+            ),
+            body: const Center(child: CircularProgressIndicator()),
           );
         }
 
         final vm = TelemetryViewModel.fromFrame(snapshot.data!);
 
-        return _DashboardContent(vm: vm);
+        return _DashboardContent(vm: vm, status: status);
       },
     );
   }
 }
 
+ConnectionStatus _connectionStatus(
+  TelemetryMode mode, {
+  required bool hasData,
+}) {
+  if (mode == TelemetryMode.acc) {
+    return hasData
+        ? const ConnectionStatus(
+            label: 'ACC Connected',
+            color: Colors.green,
+          )
+        : const ConnectionStatus(
+            label: 'ACC Disconnected',
+            color: Colors.red,
+          );
+  }
+
+  return const ConnectionStatus(
+    label: 'Mock Data',
+    color: Colors.blue,
+  );
+}
+
 class _DashboardContent extends StatefulWidget {
-  const _DashboardContent({required this.vm});
+  const _DashboardContent({required this.vm, required this.status});
 
   final TelemetryViewModel vm;
+  final ConnectionStatus status;
 
   @override
   State<_DashboardContent> createState() => _DashboardContentState();
@@ -52,7 +88,13 @@ class _DashboardContentState extends State<_DashboardContent> {
     final vm = widget.vm;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Telemetry Dashboard')),
+      appBar: AppBar(
+        title: const Text('Telemetry Dashboard'),
+        actions: [
+          _ConnectionStatusIndicator(status: widget.status),
+          const SizedBox(width: 16),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -90,6 +132,42 @@ class _DashboardContentState extends State<_DashboardContent> {
         children: [
           SizedBox(width: 100, child: Text(label)),
           Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+}
+
+class ConnectionStatus {
+  const ConnectionStatus({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+}
+
+class _ConnectionStatusIndicator extends StatelessWidget {
+  const _ConnectionStatusIndicator({required this.status});
+
+  final ConnectionStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: status.color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            status.label,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
         ],
       ),
     );
