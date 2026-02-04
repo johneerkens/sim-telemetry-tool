@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../core/models/telemetry_frame.dart';
 import '../../core/telemetry/telemetry_mode.dart';
@@ -6,25 +8,132 @@ import 'line_chart.dart';
 import 'telemetry_series.dart';
 import 'telemetry_view_model.dart';
 
-class DashboardPage extends StatelessWidget {
+class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
 
   @override
+  State<DashboardPage> createState() => _DashboardPageState();
+}
+
+class _DashboardPageState extends State<DashboardPage> {
+  TelemetryMode _mode = TelemetryMode.mock;
+  TelemetryStreamHandle? _handle;
+  Stream<TelemetryFrame>? _stream;
+
+  bool _isRecording = false;
+  final List<TelemetryFrame> _recordedFrames = [];
+  DateTime? _lastRecordedTimestamp;
+
+  static const int _maxRecordedFrames = 6000;
+  static const Duration _playbackInterval = Duration(milliseconds: 100);
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_createStream());
+  }
+
+  @override
+  void dispose() {
+    unawaited(_disposeHandle());
+    super.dispose();
+  }
+
+  Future<void> _disposeHandle() async {
+    final handle = _handle;
+    _handle = null;
+    if (handle?.dispose != null) {
+      await handle!.dispose!();
+    }
+  }
+
+  Future<void> _createStream() async {
+    await _disposeHandle();
+
+    final playbackFrames = _mode == TelemetryMode.playback
+        ? List<TelemetryFrame>.from(_recordedFrames)
+        : const <TelemetryFrame>[];
+
+    final handle = createTelemetryStream(
+      _mode,
+      playbackFrames: playbackFrames,
+      playbackInterval: _playbackInterval,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _handle = handle;
+      _stream = handle.stream;
+    });
+  }
+
+  Future<void> _setMode(TelemetryMode mode) async {
+    if (mode == _mode) return;
+
+    setState(() {
+      _mode = mode;
+      _isRecording = false;
+    });
+
+    await _createStream();
+  }
+
+  Future<void> _refresh() async {
+    await _createStream();
+  }
+
+  void _toggleRecording() {
+    if (_mode == TelemetryMode.playback) return;
+
+    setState(() {
+      _isRecording = !_isRecording;
+      if (_isRecording) {
+        _recordedFrames.clear();
+        _lastRecordedTimestamp = null;
+      }
+    });
+  }
+
+  void _recordFrame(TelemetryFrame frame) {
+    if (!_isRecording || _mode == TelemetryMode.playback) return;
+    if (_lastRecordedTimestamp == frame.timestamp) return;
+
+    _lastRecordedTimestamp = frame.timestamp;
+    _recordedFrames.add(frame);
+
+    if (_recordedFrames.length > _maxRecordedFrames) {
+      _recordedFrames.removeAt(0);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final stream = _stream ?? Stream<TelemetryFrame>.empty();
+
     return StreamBuilder<TelemetryFrame>(
-      stream: createTelemetryStream(),
+      stream: stream,
       builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          _recordFrame(snapshot.data!);
+        }
+
         final status = _connectionStatus(
-          telemetryMode,
+          _mode,
           hasData: snapshot.hasData,
           hasError: snapshot.hasError,
+          hasRecording: _recordedFrames.isNotEmpty,
         );
+
+        final actions = _buildActions(Theme.of(context));
 
         if (snapshot.hasError) {
           return _DashboardScaffold(
             status: status,
+            actions: actions,
             body: _TelemetryEmptyState(
-              mode: telemetryMode,
+              mode: _mode,
+              hasRecording: _recordedFrames.isNotEmpty,
               error: snapshot.error,
             ),
           );
@@ -33,15 +142,62 @@ class DashboardPage extends StatelessWidget {
         if (!snapshot.hasData) {
           return _DashboardScaffold(
             status: status,
-            body: _TelemetryEmptyState(mode: telemetryMode),
+            actions: actions,
+            body: _TelemetryEmptyState(
+              mode: _mode,
+              hasRecording: _recordedFrames.isNotEmpty,
+            ),
           );
         }
 
         final vm = TelemetryViewModel.fromFrame(snapshot.data!);
 
-        return _DashboardContent(vm: vm, status: status);
+        return _DashboardContent(
+          key: ValueKey(_mode),
+          vm: vm,
+          status: status,
+          mode: _mode,
+          isRecording: _isRecording,
+          actions: actions,
+        );
       },
     );
+  }
+
+  List<Widget> _buildActions(ThemeData theme) {
+    final actions = <Widget>[
+      _ModeSelector(
+        mode: _mode,
+        onChanged: (mode) async {
+          await _setMode(mode);
+        },
+      ),
+    ];
+
+    if (_mode != TelemetryMode.playback) {
+      actions.add(
+        IconButton(
+          tooltip: _isRecording ? 'Stop recording' : 'Record telemetry',
+          icon: Icon(
+            _isRecording ? Icons.stop_circle : Icons.fiber_manual_record,
+            color: _isRecording ? theme.colorScheme.error : null,
+          ),
+          onPressed: _toggleRecording,
+        ),
+      );
+    }
+
+    actions.add(
+      IconButton(
+        tooltip: 'Retry/refresh',
+        icon: const Icon(Icons.refresh),
+        onPressed: () async {
+          await _refresh();
+        },
+      ),
+    );
+
+    return actions;
   }
 }
 
@@ -49,15 +205,16 @@ ConnectionStatus _connectionStatus(
   TelemetryMode mode, {
   required bool hasData,
   required bool hasError,
+  required bool hasRecording,
 }) {
-  if (mode == TelemetryMode.acc) {
-    if (hasError) {
-      return const ConnectionStatus(
-        label: 'ACC Error',
-        color: Colors.red,
-      );
-    }
+  if (hasError) {
+    return ConnectionStatus(
+      label: '${_modeLabel(mode)} Error',
+      color: Colors.red,
+    );
+  }
 
+  if (mode == TelemetryMode.acc) {
     return hasData
         ? const ConnectionStatus(
             label: 'ACC Connected',
@@ -69,11 +226,23 @@ ConnectionStatus _connectionStatus(
           );
   }
 
-  if (hasError) {
-    return const ConnectionStatus(
-      label: 'Mock Error',
-      color: Colors.red,
-    );
+  if (mode == TelemetryMode.playback) {
+    if (!hasRecording) {
+      return const ConnectionStatus(
+        label: 'No Recording',
+        color: Colors.orange,
+      );
+    }
+
+    return hasData
+        ? const ConnectionStatus(
+            label: 'Playback',
+            color: Colors.teal,
+          )
+        : const ConnectionStatus(
+            label: 'Playback Starting',
+            color: Colors.blueGrey,
+          );
   }
 
   return hasData
@@ -88,19 +257,26 @@ ConnectionStatus _connectionStatus(
 }
 
 class _DashboardScaffold extends StatelessWidget {
-  const _DashboardScaffold({required this.status, required this.body});
+  const _DashboardScaffold({
+    required this.status,
+    required this.body,
+    required this.actions,
+  });
 
   final ConnectionStatus status;
   final Widget body;
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Telemetry Dashboard'),
+        title: const Text('Sim Telemetry Tool'),
         actions: [
           _ConnectionStatusIndicator(status: status),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
+          ...actions,
+          const SizedBox(width: 12),
         ],
       ),
       body: body,
@@ -109,10 +285,20 @@ class _DashboardScaffold extends StatelessWidget {
 }
 
 class _DashboardContent extends StatefulWidget {
-  const _DashboardContent({required this.vm, required this.status});
+  const _DashboardContent({
+    super.key,
+    required this.vm,
+    required this.status,
+    required this.mode,
+    required this.isRecording,
+    required this.actions,
+  });
 
   final TelemetryViewModel vm;
   final ConnectionStatus status;
+  final TelemetryMode mode;
+  final bool isRecording;
+  final List<Widget> actions;
 
   @override
   State<_DashboardContent> createState() => _DashboardContentState();
@@ -146,10 +332,11 @@ class _DashboardContentState extends State<_DashboardContent> {
 
     return _DashboardScaffold(
       status: widget.status,
+      actions: widget.actions,
       body: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
-          const spacing = 16.0;
+          const spacing = 12.0;
           final columns = width >= 1100
               ? 4
               : width >= 780
@@ -181,7 +368,7 @@ class _DashboardContentState extends State<_DashboardContent> {
               value: vm.gear.toString(),
               accent: Colors.orange,
               footer: Text(
-                _modeLabel(telemetryMode),
+                _modeFooterLabel(widget.mode, widget.isRecording),
                 style: theme.textTheme.bodySmall,
               ),
             ),
@@ -193,7 +380,7 @@ class _DashboardContentState extends State<_DashboardContent> {
           ];
 
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -204,13 +391,13 @@ class _DashboardContentState extends State<_DashboardContent> {
                       .map((tile) => SizedBox(width: tileWidth, child: tile))
                       .toList(),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 Text(
                   'Trends',
                   style: theme.textTheme.titleMedium
                       ?.copyWith(fontWeight: FontWeight.w600),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Wrap(
                   spacing: spacing,
                   runSpacing: spacing,
@@ -255,9 +442,84 @@ class _DashboardContentState extends State<_DashboardContent> {
 String _modeLabel(TelemetryMode mode) {
   switch (mode) {
     case TelemetryMode.acc:
-      return 'Mode: ACC';
+      return 'ACC';
     case TelemetryMode.mock:
-      return 'Mode: Mock';
+      return 'Mock';
+    case TelemetryMode.playback:
+      return 'Playback';
+  }
+}
+
+String _modeFooterLabel(TelemetryMode mode, bool isRecording) {
+  final base = 'Mode: ${_modeLabel(mode)}';
+  return isRecording ? '$base | Recording' : base;
+}
+
+IconData _modeIcon(TelemetryMode mode) {
+  switch (mode) {
+    case TelemetryMode.acc:
+      return Icons.sports_motorsports;
+    case TelemetryMode.mock:
+      return Icons.auto_awesome;
+    case TelemetryMode.playback:
+      return Icons.play_circle_outline;
+  }
+}
+
+class _ModeSelector extends StatelessWidget {
+  const _ModeSelector({required this.mode, required this.onChanged});
+
+  final TelemetryMode mode;
+  final ValueChanged<TelemetryMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest
+              .withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: theme.dividerColor.withValues(alpha: 0.2),
+          ),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<TelemetryMode>(
+            value: mode,
+            icon: const Icon(Icons.expand_more),
+            style: theme.textTheme.bodyMedium,
+            dropdownColor: theme.colorScheme.surface,
+            onChanged: (value) {
+              if (value != null) {
+                onChanged(value);
+              }
+            },
+            items: TelemetryMode.values
+                .map(
+                  (mode) => DropdownMenuItem(
+                    value: mode,
+                    child: Row(
+                      children: [
+                        Icon(
+                          _modeIcon(mode),
+                          size: 18,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(_modeLabel(mode)),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -324,7 +586,7 @@ class _MetricCard extends StatelessWidget {
             ],
           ),
           if (footer != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             footer!,
           ],
         ],
@@ -504,7 +766,10 @@ class _ChartCard extends StatelessWidget {
         children: [
           Text(
             label,
-            style: theme.textTheme.labelMedium?.copyWith(letterSpacing: 0.6),
+            style: theme.textTheme.labelMedium?.copyWith(
+              letterSpacing: 0.6,
+              color: color,
+            ),
           ),
           const SizedBox(height: 12),
           child,
@@ -515,9 +780,14 @@ class _ChartCard extends StatelessWidget {
 }
 
 class _TelemetryEmptyState extends StatelessWidget {
-  const _TelemetryEmptyState({required this.mode, this.error});
+  const _TelemetryEmptyState({
+    required this.mode,
+    required this.hasRecording,
+    this.error,
+  });
 
   final TelemetryMode mode;
+  final bool hasRecording;
   final Object? error;
 
   @override
@@ -529,20 +799,32 @@ class _TelemetryEmptyState extends StatelessWidget {
         ? 'Telemetry stream error'
         : mode == TelemetryMode.acc
             ? 'Waiting for ACC telemetry'
-            : 'Starting mock telemetry';
+            : mode == TelemetryMode.playback
+                ? hasRecording
+                    ? 'Starting playback'
+                    : 'No recording yet'
+                : 'Starting mock telemetry';
 
     final message = isError
         ? 'We could not read telemetry from the current source.'
         : mode == TelemetryMode.acc
             ? 'Launch ACC and start a session. Telemetry packets will appear here once the game is running.'
-            : 'Generating simulated telemetry so you can explore the dashboard without the game.';
+            : mode == TelemetryMode.playback
+                ? hasRecording
+                    ? 'Preparing your last recording for playback.'
+                    : 'Record telemetry from ACC or the mock source to enable playback.'
+                : 'Generating simulated telemetry so you can explore the dashboard without the game.';
 
-    final icon = isError ? Icons.error_outline : Icons.sensors_off;
+    final icon = isError
+        ? Icons.error_outline
+        : mode == TelemetryMode.playback
+            ? Icons.play_circle_outline
+            : Icons.sensors_off;
     final accent = isError ? theme.colorScheme.error : theme.colorScheme.primary;
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
           child: Column(
@@ -581,7 +863,7 @@ class _TelemetryEmptyState extends StatelessWidget {
                 ),
               ],
               if (!isError) ...[
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: LinearProgressIndicator(
