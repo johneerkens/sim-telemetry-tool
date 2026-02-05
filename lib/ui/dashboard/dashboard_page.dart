@@ -23,6 +23,7 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isRecording = false;
   final List<TelemetryFrame> _recordedFrames = [];
   DateTime? _lastRecordedTimestamp;
+  DateTime? _lastPacketTimestamp;
 
   static const int _maxRecordedFrames = 6000;
   static const Duration _playbackInterval = Duration(milliseconds: 100);
@@ -114,23 +115,42 @@ class _DashboardPageState extends State<DashboardPage> {
     return StreamBuilder<TelemetryFrame>(
       stream: stream,
       builder: (context, snapshot) {
-        if (snapshot.hasData) {
-          _recordFrame(snapshot.data!);
+        final frame = snapshot.data;
+        if (frame != null) {
+          _recordFrame(frame);
+          _lastPacketTimestamp = frame.timestamp;
         }
 
         final status = _connectionStatus(
           _mode,
-          hasData: snapshot.hasData,
+          hasData: frame != null,
           hasError: snapshot.hasError,
           hasRecording: _recordedFrames.isNotEmpty,
         );
 
         final actions = _buildActions(Theme.of(context));
+        final lastPacketAt = frame?.timestamp ?? _lastPacketTimestamp;
+
+        final details = ConnectionDetails(
+          mode: _mode,
+          status: status,
+          hasData: frame != null,
+          hasError: snapshot.hasError,
+          error: snapshot.error,
+          lastPacketAt: lastPacketAt,
+          lastRecordedAt: _lastRecordedTimestamp,
+          recordedFrames: _recordedFrames.length,
+          isRecording: _isRecording,
+          playbackInterval: _playbackInterval,
+          accPort: 9000,
+          connectionState: snapshot.connectionState,
+        );
 
         if (snapshot.hasError) {
           return _DashboardScaffold(
             status: status,
             actions: actions,
+            details: details,
             body: _TelemetryEmptyState(
               mode: _mode,
               hasRecording: _recordedFrames.isNotEmpty,
@@ -139,10 +159,11 @@ class _DashboardPageState extends State<DashboardPage> {
           );
         }
 
-        if (!snapshot.hasData) {
+        if (frame == null) {
           return _DashboardScaffold(
             status: status,
             actions: actions,
+            details: details,
             body: _TelemetryEmptyState(
               mode: _mode,
               hasRecording: _recordedFrames.isNotEmpty,
@@ -150,12 +171,13 @@ class _DashboardPageState extends State<DashboardPage> {
           );
         }
 
-        final vm = TelemetryViewModel.fromFrame(snapshot.data!);
+        final vm = TelemetryViewModel.fromFrame(frame);
 
         return _DashboardContent(
           key: ValueKey(_mode),
           vm: vm,
           status: status,
+          details: details,
           mode: _mode,
           isRecording: _isRecording,
           actions: actions,
@@ -256,16 +278,48 @@ ConnectionStatus _connectionStatus(
         );
 }
 
+class ConnectionDetails {
+  const ConnectionDetails({
+    required this.mode,
+    required this.status,
+    required this.hasData,
+    required this.hasError,
+    required this.error,
+    required this.lastPacketAt,
+    required this.lastRecordedAt,
+    required this.recordedFrames,
+    required this.isRecording,
+    required this.playbackInterval,
+    required this.accPort,
+    required this.connectionState,
+  });
+
+  final TelemetryMode mode;
+  final ConnectionStatus status;
+  final bool hasData;
+  final bool hasError;
+  final Object? error;
+  final DateTime? lastPacketAt;
+  final DateTime? lastRecordedAt;
+  final int recordedFrames;
+  final bool isRecording;
+  final Duration playbackInterval;
+  final int accPort;
+  final ConnectionState connectionState;
+}
+
 class _DashboardScaffold extends StatelessWidget {
   const _DashboardScaffold({
     required this.status,
     required this.body,
     required this.actions,
+    required this.details,
   });
 
   final ConnectionStatus status;
   final Widget body;
   final List<Widget> actions;
+  final ConnectionDetails details;
 
   @override
   Widget build(BuildContext context) {
@@ -277,8 +331,21 @@ class _DashboardScaffold extends StatelessWidget {
           const SizedBox(width: 12),
           ...actions,
           const SizedBox(width: 12),
+          Builder(
+            builder: (context) {
+              return IconButton(
+                tooltip: 'Connection details',
+                icon: const Icon(Icons.info_outline),
+                onPressed: () {
+                  Scaffold.of(context).openEndDrawer();
+                },
+              );
+            },
+          ),
+          const SizedBox(width: 8),
         ],
       ),
+      endDrawer: _ConnectionDetailsDrawer(details: details),
       body: body,
     );
   }
@@ -289,6 +356,7 @@ class _DashboardContent extends StatefulWidget {
     super.key,
     required this.vm,
     required this.status,
+    required this.details,
     required this.mode,
     required this.isRecording,
     required this.actions,
@@ -296,6 +364,7 @@ class _DashboardContent extends StatefulWidget {
 
   final TelemetryViewModel vm;
   final ConnectionStatus status;
+  final ConnectionDetails details;
   final TelemetryMode mode;
   final bool isRecording;
   final List<Widget> actions;
@@ -333,6 +402,7 @@ class _DashboardContentState extends State<_DashboardContent> {
     return _DashboardScaffold(
       status: widget.status,
       actions: widget.actions,
+      details: widget.details,
       body: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
@@ -881,6 +951,135 @@ class _TelemetryEmptyState extends StatelessWidget {
   }
 }
 
+class _ConnectionDetailsDrawer extends StatelessWidget {
+  const _ConnectionDetailsDrawer({required this.details});
+
+  final ConnectionDetails details;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final status = details.status;
+    final connectionStateLabel = details.connectionState
+        .toString()
+        .split('.')
+        .last;
+
+    return Drawer(
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(
+              'Connection Details',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _DetailRow(
+              label: 'Status',
+              child: Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: status.color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(status.label)),
+                ],
+              ),
+            ),
+            _DetailRow(
+              label: 'Source',
+              child: Text(_modeLabel(details.mode)),
+            ),
+            _DetailRow(
+              label: 'Stream state',
+              child: Text(connectionStateLabel),
+            ),
+            _DetailRow(
+              label: 'Has data',
+              child: Text(details.hasData ? 'Yes' : 'No'),
+            ),
+            _DetailRow(
+              label: 'Has error',
+              child: Text(details.hasError ? 'Yes' : 'No'),
+            ),
+            _DetailRow(
+              label: 'Error',
+              child: Text(details.error?.toString() ?? '--'),
+            ),
+            _DetailRow(
+              label: 'Last packet',
+              child: Text(_formatDateTime(details.lastPacketAt)),
+            ),
+            _DetailRow(
+              label: 'Recording',
+              child: Text(details.isRecording ? 'Active' : 'Off'),
+            ),
+            _DetailRow(
+              label: 'Recorded frames',
+              child: Text(details.recordedFrames.toString()),
+            ),
+            _DetailRow(
+              label: 'Last recorded',
+              child: Text(_formatDateTime(details.lastRecordedAt)),
+            ),
+            if (details.mode == TelemetryMode.acc)
+              _DetailRow(
+                label: 'ACC UDP port',
+                child: Text(details.accPort.toString()),
+              ),
+            if (details.mode == TelemetryMode.playback)
+              _DetailRow(
+                label: 'Playback interval',
+                child: Text(
+                  '${details.playbackInterval.inMilliseconds} ms',
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.hintColor,
+              ),
+            ),
+          ),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+}
+
 class ConnectionStatus {
   const ConnectionStatus({required this.label, required this.color});
 
@@ -915,4 +1114,12 @@ class _ConnectionStatusIndicator extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatDateTime(DateTime? value) {
+  if (value == null) return '--';
+  final local = value.toLocal();
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${local.year}-${two(local.month)}-${two(local.day)} '
+      '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
 }
