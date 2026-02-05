@@ -114,7 +114,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return StreamBuilder<TelemetryFrame>(
       stream: stream,
       builder: (context, snapshot) {
-<<<<<<< ours
         if (snapshot.hasData) {
           _recordFrame(snapshot.data!);
         }
@@ -148,29 +147,11 @@ class _DashboardPageState extends State<DashboardPage> {
               mode: _mode,
               hasRecording: _recordedFrames.isNotEmpty,
             ),
-=======
-        final status = _connectionStatus(
-          telemetryMode,
-          hasData: snapshot.hasData,
-        );
-
-        if (!snapshot.hasData) {
-          return Scaffold(
-            appBar: AppBar(
-              title: const Text('Telemetry Dashboard'),
-              actions: [
-                _ConnectionStatusIndicator(status: status),
-                const SizedBox(width: 16),
-              ],
-            ),
-            body: const Center(child: CircularProgressIndicator()),
->>>>>>> theirs
           );
         }
 
         final vm = TelemetryViewModel.fromFrame(snapshot.data!);
 
-<<<<<<< ours
         return _DashboardContent(
           key: ValueKey(_mode),
           vm: vm,
@@ -179,9 +160,6 @@ class _DashboardPageState extends State<DashboardPage> {
           isRecording: _isRecording,
           actions: actions,
         );
-=======
-        return _DashboardContent(vm: vm, status: status);
->>>>>>> theirs
       },
     );
   }
@@ -306,30 +284,7 @@ class _DashboardScaffold extends StatelessWidget {
   }
 }
 
-ConnectionStatus _connectionStatus(
-  TelemetryMode mode, {
-  required bool hasData,
-}) {
-  if (mode == TelemetryMode.acc) {
-    return hasData
-        ? const ConnectionStatus(
-            label: 'ACC Connected',
-            color: Colors.green,
-          )
-        : const ConnectionStatus(
-            label: 'ACC Disconnected',
-            color: Colors.red,
-          );
-  }
-
-  return const ConnectionStatus(
-    label: 'Mock Data',
-    color: Colors.blue,
-  );
-}
-
 class _DashboardContent extends StatefulWidget {
-<<<<<<< ours
   const _DashboardContent({
     super.key,
     required this.vm,
@@ -344,12 +299,6 @@ class _DashboardContent extends StatefulWidget {
   final TelemetryMode mode;
   final bool isRecording;
   final List<Widget> actions;
-=======
-  const _DashboardContent({required this.vm, required this.status});
-
-  final TelemetryViewModel vm;
-  final ConnectionStatus status;
->>>>>>> theirs
 
   @override
   State<_DashboardContent> createState() => _DashboardContentState();
@@ -381,7 +330,6 @@ class _DashboardContentState extends State<_DashboardContent> {
     final theme = Theme.of(context);
     final lastUpdate = TimeOfDay.fromDateTime(vm.timestamp).format(context);
 
-<<<<<<< ours
     return _DashboardScaffold(
       status: widget.status,
       actions: widget.actions,
@@ -408,27 +356,6 @@ class _DashboardContentState extends State<_DashboardContent> {
                 'Updated $lastUpdate',
                 style: theme.textTheme.bodySmall,
               ),
-=======
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Telemetry Dashboard'),
-        actions: [
-          _ConnectionStatusIndicator(status: widget.status),
-          const SizedBox(width: 16),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _row('Speed', '${vm.speedKph.toStringAsFixed(1)} km/h'),
-            LineChart(
-              values: _speedSeries.values,
-              min: 0,
-              max: 320,
-              color: Colors.blue,
->>>>>>> theirs
             ),
             _MetricCard(
               label: 'RPM',
@@ -949,42 +876,6 @@ class _TelemetryEmptyState extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class ConnectionStatus {
-  const ConnectionStatus({required this.label, required this.color});
-
-  final String label;
-  final Color color;
-}
-
-class _ConnectionStatusIndicator extends StatelessWidget {
-  const _ConnectionStatusIndicator({required this.status});
-
-  final ConnectionStatus status;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Row(
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: status.color,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            status.label,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-        ],
       ),
     );
   }
