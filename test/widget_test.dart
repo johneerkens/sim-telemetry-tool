@@ -7,7 +7,6 @@
 
 // ignore_for_file: library_prefixes
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:sim_telemetry_tool/main.dart' as mainApp;
