@@ -6,7 +6,7 @@ import '../models/telemetry_frame.dart';
 class MockTelemetrySource {
   Stream<TelemetryFrame> stream({
     Duration interval = const Duration(milliseconds: 100),
-  }) async* {
+  }) {
     final rng = Random();
     final segments = <_SimSegment>[
       const _SimSegment(
@@ -59,7 +59,7 @@ class MockTelemetrySource {
     double steering = 0.0;
     double speedKph = 0.0;
 
-    while (true) {
+    TelemetryFrame nextFrame() {
       final segment = segments[segmentIndex];
       segmentElapsed += dt;
 
@@ -85,7 +85,7 @@ class MockTelemetrySource {
       final gear = _gearForSpeed(speedKph);
       final rpm = _rpmForSpeed(speedKph, gear, rng);
 
-      yield TelemetryFrame(
+      final frame = TelemetryFrame(
         timestamp: DateTime.now(),
         speedKph: speedKph,
         rpm: rpm,
@@ -100,8 +100,27 @@ class MockTelemetrySource {
         segmentIndex = (segmentIndex + 1) % segments.length;
       }
 
-      await Future.delayed(interval);
+      return frame;
     }
+
+    Timer? timer;
+    late final StreamController<TelemetryFrame> controller;
+
+    void emit() {
+      controller.add(nextFrame());
+    }
+
+    controller = StreamController<TelemetryFrame>(
+      onListen: () {
+        emit();
+        timer = Timer.periodic(interval, (_) => emit());
+      },
+      onCancel: () {
+        timer?.cancel();
+      },
+    );
+
+    return controller.stream;
   }
 }
 
