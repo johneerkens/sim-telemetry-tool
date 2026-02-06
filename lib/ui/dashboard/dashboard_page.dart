@@ -323,9 +323,16 @@ class _DashboardScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
         title: const Text('Sim Telemetry Tool'),
+        centerTitle: false,
+        elevation: 0,
+        backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.92),
+        surfaceTintColor: Colors.transparent,
         actions: [
           _ConnectionStatusIndicator(status: status),
           const SizedBox(width: 12),
@@ -344,9 +351,16 @@ class _DashboardScaffold extends StatelessWidget {
           ),
           const SizedBox(width: 8),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(
+            height: 1,
+            color: theme.dividerColor.withValues(alpha: 0.2),
+          ),
+        ),
       ),
       endDrawer: _ConnectionDetailsDrawer(details: details),
-      body: body,
+      body: _DashboardBackground(child: body),
     );
   }
 }
@@ -373,15 +387,39 @@ class _DashboardContent extends StatefulWidget {
   State<_DashboardContent> createState() => _DashboardContentState();
 }
 
-class _DashboardContentState extends State<_DashboardContent> {
+class _DashboardContentState extends State<_DashboardContent>
+    with SingleTickerProviderStateMixin {
   final _speedSeries = TelemetrySeries(maxPoints: 120);
   final _rpmSeries = TelemetrySeries(maxPoints: 120);
+  late final AnimationController _entryController;
+  late final Animation<double> _entryFade;
+  late final Animation<Offset> _entrySlide;
 
   @override
   void initState() {
     super.initState();
+    _entryController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
+    final curve = CurvedAnimation(
+      parent: _entryController,
+      curve: Curves.easeOutCubic,
+    );
+    _entryFade = curve;
+    _entrySlide = Tween<Offset>(
+      begin: const Offset(0, 0.04),
+      end: Offset.zero,
+    ).animate(curve);
+    _entryController.forward();
     _speedSeries.add(widget.vm.speedKph);
     _rpmSeries.add(widget.vm.rpm.toDouble());
+  }
+
+  @override
+  void dispose() {
+    _entryController.dispose();
+    super.dispose();
   }
 
   @override
@@ -403,107 +441,111 @@ class _DashboardContentState extends State<_DashboardContent> {
       status: widget.status,
       actions: widget.actions,
       details: widget.details,
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth;
-          const spacing = 12.0;
-          final columns = width >= 1100
-              ? 4
-              : width >= 780
-                  ? 2
-                  : 1;
-          final tileWidth =
-              (width - spacing * (columns - 1)) / columns;
-          final chartWidth = width >= 900 ? (width - spacing) / 2 : width;
+      body: FadeTransition(
+        opacity: _entryFade,
+        child: SlideTransition(
+          position: _entrySlide,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              const spacing = 12.0;
+              final columns = width >= 1100
+                  ? 4
+                  : width >= 780
+                      ? 2
+                      : 1;
+              final tileWidth =
+                  (width - spacing * (columns - 1)) / columns;
+              final chartWidth =
+                  width >= 900 ? (width - spacing) / 2 : width;
 
-          final tiles = <Widget>[
-            _MetricCard(
-              label: 'Speed',
-              value: vm.speedKph.toStringAsFixed(0),
-              unit: 'km/h',
-              accent: Colors.blue,
-              footer: Text(
-                'Updated $lastUpdate',
-                style: theme.textTheme.bodySmall,
-              ),
-            ),
-            _MetricCard(
-              label: 'RPM',
-              value: vm.rpm.toString(),
-              unit: 'rpm',
-              accent: Colors.red,
-            ),
-            _MetricCard(
-              label: 'Gear',
-              value: vm.gear.toString(),
-              accent: Colors.orange,
-              footer: Text(
-                _modeFooterLabel(widget.mode, widget.isRecording),
-                style: theme.textTheme.bodySmall,
-              ),
-            ),
-            _PedalCard(
-              throttle: vm.throttle,
-              brake: vm.brake,
-            ),
-            _SteeringCard(steering: vm.steering),
-          ];
+              final tiles = <Widget>[
+                _MetricCard(
+                  label: 'Speed',
+                  value: vm.speedKph.toStringAsFixed(0),
+                  unit: 'km/h',
+                  accent: Colors.blue,
+                  footer: Text(
+                    'Updated $lastUpdate',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                _MetricCard(
+                  label: 'RPM',
+                  value: vm.rpm.toString(),
+                  unit: 'rpm',
+                  accent: Colors.red,
+                ),
+                _MetricCard(
+                  label: 'Gear',
+                  value: vm.gear.toString(),
+                  accent: Colors.orange,
+                  footer: Text(
+                    _modeFooterLabel(widget.mode, widget.isRecording),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                _PedalCard(
+                  throttle: vm.throttle,
+                  brake: vm.brake,
+                ),
+                _SteeringCard(steering: vm.steering),
+              ];
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: spacing,
-                  runSpacing: spacing,
-                  children: tiles
-                      .map((tile) => SizedBox(width: tileWidth, child: tile))
-                      .toList(),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'Trends',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: spacing,
-                  runSpacing: spacing,
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(
-                      width: chartWidth,
-                      child: _ChartCard(
-                        label: 'Speed',
-                        color: Colors.blue,
-                        child: LineChart(
-                          values: _speedSeries.values,
-                          min: 0,
-                          max: 320,
-                          color: Colors.blue,
-                        ),
-                      ),
+                    Wrap(
+                      spacing: spacing,
+                      runSpacing: spacing,
+                      children: tiles
+                          .map((tile) =>
+                              SizedBox(width: tileWidth, child: tile))
+                          .toList(),
                     ),
-                    SizedBox(
-                      width: chartWidth,
-                      child: _ChartCard(
-                        label: 'RPM',
-                        color: Colors.red,
-                        child: LineChart(
-                          values: _rpmSeries.values,
-                          min: 0,
-                          max: 9000,
-                          color: Colors.red,
+                    const SizedBox(height: 20),
+                    const _SectionHeader(title: 'Trends'),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: spacing,
+                      runSpacing: spacing,
+                      children: [
+                        SizedBox(
+                          width: chartWidth,
+                          child: _ChartCard(
+                            label: 'Speed',
+                            color: Colors.blue,
+                            child: LineChart(
+                              values: _speedSeries.values,
+                              min: 0,
+                              max: 320,
+                              color: Colors.blue,
+                            ),
+                          ),
                         ),
-                      ),
+                        SizedBox(
+                          width: chartWidth,
+                          child: _ChartCard(
+                            label: 'RPM',
+                            color: Colors.red,
+                            child: LineChart(
+                              values: _rpmSeries.values,
+                              min: 0,
+                              max: 9000,
+                              color: Colors.red,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
-          );
-        },
+              );
+            },
+          ),
+        ),
       ),
     );
   }
@@ -593,6 +635,162 @@ class _ModeSelector extends StatelessWidget {
   }
 }
 
+class _DashboardBackground extends StatelessWidget {
+  const _DashboardBackground({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final tertiary = theme.colorScheme.tertiary;
+
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  theme.colorScheme.surface,
+                  theme.colorScheme.surfaceContainerHighest
+                      .withValues(alpha: 0.6),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: -140,
+          right: -120,
+          child: _GlowCircle(
+            color: primary.withValues(alpha: 0.18),
+            size: 280,
+          ),
+        ),
+        Positioned(
+          bottom: -180,
+          left: -140,
+          child: _GlowCircle(
+            color: tertiary.withValues(alpha: 0.18),
+            size: 320,
+          ),
+        ),
+        Positioned.fill(child: child),
+      ],
+    );
+  }
+}
+
+class _GlowCircle extends StatelessWidget {
+  const _GlowCircle({required this.color, required this.size});
+
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.3),
+              blurRadius: 80,
+              spreadRadius: 40,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Row(
+      children: [
+        Text(
+          title,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Container(
+            height: 1,
+            color: theme.dividerColor.withValues(alpha: 0.2),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DashboardCard extends StatelessWidget {
+  const _DashboardCard({
+    required this.child,
+    this.accent,
+  });
+
+  final Widget child;
+  final Color? accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accentColor = accent ?? theme.colorScheme.primary;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            theme.colorScheme.surface.withValues(alpha: 0.95),
+            theme.colorScheme.surfaceContainerHighest
+                .withValues(alpha: 0.55),
+            accentColor.withValues(alpha: 0.06),
+          ],
+        ),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.shadowColor.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
 class _MetricCard extends StatelessWidget {
   const _MetricCard({
     required this.label,
@@ -612,16 +810,8 @@ class _MetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest
-            .withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: theme.dividerColor.withValues(alpha: 0.2),
-        ),
-      ),
+    return _DashboardCard(
+      accent: accent,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -675,16 +865,8 @@ class _PedalCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest
-            .withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: theme.dividerColor.withValues(alpha: 0.2),
-        ),
-      ),
+    return _DashboardCard(
+      accent: Colors.green,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -757,16 +939,8 @@ class _SteeringCard extends StatelessWidget {
     final percent = (steeringValue.abs() * 100).toStringAsFixed(0);
     final direction = steeringValue >= 0 ? 'Right' : 'Left';
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest
-            .withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: theme.dividerColor.withValues(alpha: 0.2),
-        ),
-      ),
+    return _DashboardCard(
+      accent: theme.colorScheme.primary,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -821,16 +995,8 @@ class _ChartCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest
-            .withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: theme.dividerColor.withValues(alpha: 0.2),
-        ),
-      ),
+    return _DashboardCard(
+      accent: color,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
